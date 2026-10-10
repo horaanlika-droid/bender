@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>BENDER — прототип робота из «Футурамы»</title>
+  <meta property="og:title" content="BENDER — прототип робота из «Футурамы»">
+  <meta property="og:description" content="Железный зад с ложной биографией и инструментами в физический мир. Голова — планшет с веб-мордой, тело собирается вокруг.">
+  <meta property="og:image" content="%PUBLIC_URL%/images/hero.jpg">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="about.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-text">
+      <p class="kicker">мастерская · 3D-принтер · ESP32 · ИИ</p>
+      <h1>BENDER</h1>
+      <p class="tagline">Прототип робота из «Футурамы».<br>
+      Железный зад с <b>ложной биографией</b> и <b>инструментами в физический мир</b>.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="index.html">Открыть морду</a>
+        <a class="btn btn-ghost tg-bot-link" href="%TG_BOT_URL%" hidden>Написать боту</a>
+      </div>
+    </div>
+    <div class="hero-art">
+      <img src="images/hero.jpg" alt="Концепт прототипа: металлическая голова с сигарой на верстаке">
+    </div>
+  </header>
+
+  <main>
+    <section class="cards">
+      <article class="card">
+        <h2>Ложная биография</h2>
+        <p>Мозг считает канон «Футурамы» своими воспоминаниями: 180 эпизодов, герои, мир 3000-х, хронология.
+        Нет в памяти — говорит «не помню», а не выдумывает.</p>
+      </article>
+      <article class="card">
+        <h2>Морда на планшете</h2>
+        <p>Голова — это iPad в напечатанном корпусе: глаза и рот живут в веб-приложении. Моргает, подмигивает,
+        говорит коронные фразы. Экран вставляется в голову — и она оживает.</p>
+      </article>
+      <article class="card">
+        <h2>Тело собирается</h2>
+        <p>Вокруг планшета — печатный корпус, ESP32, серво: челюсть, люк в груди, руки. Tools в мозге
+        ровно те, что есть в железе: не выдумываем конечности.</p>
+      </article>
+    </section>
+
+    <section class="flow">
+      <h2>Как это устроено</h2>
+      <div class="flow-row">
+        <div class="flow-box">Голос / текст</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box accent">brain: персона + память + LLM</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box">tools (JSON)</div>
+      </div>
+      <div class="flow-row">
+        <div class="flow-box">Морда на планшете <span>глаза, рот, речь</span></div>
+        <div class="flow-arrow">+</div>
+        <div class="flow-box">ESP32 <span>сигара, челюсть, люк</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box">Печатный корпус</div>
+      </div>
+    </section>
+
+    <section class="phases">
+      <h2>Фазы</h2>
+      <ol>
+        <li class="done"><span>0</span> Мозг без железа — <b>готово</b>: персона, лор-память, tools в сухом логе</li>
+        <li class="now"><span>1</span> Морда на планшете + лендинг в Telegram — <b>сейчас</b></li>
+        <li><span>2</span> Корпус: печать головы под iPad и торса</li>
+        <li><span>3</span> Люк, челюсть, руки на серво + ESP32</li>
+        <li><span>4</span> Камера «глазами», база</li>
+      </ol>
+    </section>
+
+    <section class="budget">
+      <h2>Касса — честно</h2>
+      <p class="big">500 000 ₽</p>
+      <p>Расход: <b>0 ₽</b>. Одна задача за раунд. Не сливаем бюджет в первый заказ:
+      потолок первой закупки ≤ 45 000 ₽, резерв на брак и перепечатку держим.</p>
+    </section>
+
+    <section class="cta">
+      <h2>Дальше — железо</h2>
+      <p>Мозг и морда живут уже сейчас. Следующий шаг — печать и закупка фазы 0.</p>
+      <div class="cta-row center">
+        <a class="btn btn-primary" href="index.html">Открыть морду</a>
+        <a class="btn btn-ghost tg-bot-link" href="%TG_BOT_URL%" hidden>Бот в Telegram</a>
+        <a class="btn btn-ghost" href="https://github.com/horaanlika-droid/bender" target="_blank" rel="noopener">Код на GitHub</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Ведущий: Бендер. Старина. · Проект-дневник: README, NEXT_ROUND, BOM, BUDGET</p>
+  </footer>
+  <script src="about.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "bender-landing",
+  "version": "1.0.0",
+  "description": "BENDER — лендинг проекта, Telegram Mini App (BotHost)",
+  "main": "app.js",
+  "private": true,
+  "scripts": {
+    "start": "node app.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
