@@ -1,0 +1,19 @@
+{
+  "name": "БЕНДЕР — морда на планшете",
+  "short_name": "Бендер",
+  "description": "Глаза и рот Бендера живут на экране планшета: вставь его в напечатанную голову.",
+  "lang": "ru",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d0f13",
+  "theme_color": "#14161a",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
