@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#14161a">
+  <title>БЕНДЕР — морда</title>
+  <meta property="og:title" content="БЕНДЕР — морда на планшете">
+  <meta property="og:description" content="Глаза и рот живут на экране: вставь планшет в напечатанную голову.">
+  <meta property="og:image" content="%PUBLIC_URL%/images/hero.jpg">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="face.css">
+</head>
+<body>
+  <div id="stage">
+    <svg id="face" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid meet" aria-label="Морда Бендера">
+      <defs>
+        <radialGradient id="plateGrad" cx="50%" cy="38%" r="85%">
+          <stop offset="0%" stop-color="#2c313a"/>
+          <stop offset="55%" stop-color="#1c2027"/>
+          <stop offset="100%" stop-color="#12141a"/>
+        </radialGradient>
+        <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
+          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+        </linearGradient>
+        <radialGradient id="eyeGrad" cx="42%" cy="35%" r="75%">
+          <stop offset="0%" stop-color="#f4f1e8"/>
+          <stop offset="70%" stop-color="#ddd8c9"/>
+          <stop offset="100%" stop-color="#b9b3a2"/>
+        </radialGradient>
+        <radialGradient id="pupilGrad" cx="38%" cy="32%" r="80%">
+          <stop offset="0%" stop-color="#2a2d35"/>
+          <stop offset="100%" stop-color="#0b0c10"/>
+        </radialGradient>
+        <linearGradient id="lidGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#4a515c"/>
+          <stop offset="100%" stop-color="#2a2f38"/>
+        </linearGradient>
+        <linearGradient id="metalEdge" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#5a626e"/>
+          <stop offset="100%" stop-color="#23272e"/>
+        </linearGradient>
+        <radialGradient id="tipGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#ffb37a"/>
+          <stop offset="35%" stop-color="#ff6b2e"/>
+          <stop offset="100%" stop-color="#ff6b2e" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="6"/>
+        </filter>
+        <clipPath id="eyeClipL"><circle cx="420" cy="310" r="130"/></clipPath>
+        <clipPath id="eyeClipR"><circle cx="780" cy="310" r="130"/></clipPath>
+      </defs>
+
+      <!-- металлическая пластина морды -->
+      <rect id="plate" x="10" y="10" width="1180" height="780" rx="90" fill="url(#plateGrad)" stroke="#3a414c" stroke-width="4"/>
+      <rect x="40" y="40" width="1120" height="260" rx="70" fill="url(#shine)"/>
+
+      <!-- винты по углам -->
+      <g fill="#171a20" stroke="#4d5561" stroke-width="3">
+        <circle cx="80" cy="80" r="14"/><circle cx="1120" cy="80" r="14"/>
+        <circle cx="80" cy="720" r="14"/><circle cx="1120" cy="720" r="14"/>
+      </g>
+
+      <!-- глаза -->
+      <g id="eyeL">
+        <circle cx="420" cy="310" r="142" fill="url(#metalEdge)"/>
+        <circle cx="420" cy="310" r="130" fill="url(#eyeGrad)"/>
+        <g clip-path="url(#eyeClipL)">
+          <g id="pupilL" transform="translate(420 310)">
+            <circle r="52" fill="url(#pupilGrad)"/>
+            <circle cx="-16" cy="-18" r="12" fill="#ffffff" opacity="0.85"/>
+          </g>
+          <g id="lidL"><rect x="290" y="120" width="260" height="150" fill="url(#lidGrad)"/></g>
+        </g>
+        <circle cx="420" cy="310" r="130" fill="none" stroke="#20242b" stroke-width="6" opacity="0.55"/>
+      </g>
+      <g id="eyeR">
+        <circle cx="780" cy="310" r="142" fill="url(#metalEdge)"/>
+        <circle cx="780" cy="310" r="130" fill="url(#eyeGrad)"/>
+        <g clip-path="url(#eyeClipR)">
+          <g id="pupilR" transform="translate(780 310)">
+            <circle r="52" fill="url(#pupilGrad)"/>
+            <circle cx="-16" cy="-18" r="12" fill="#ffffff" opacity="0.85"/>
+          </g>
+          <g id="lidR"><rect x="650" y="120" width="260" height="150" fill="url(#lidGrad)"/></g>
+        </g>
+        <circle cx="780" cy="310" r="130" fill="none" stroke="#20242b" stroke-width="6" opacity="0.55"/>
+      </g>
+
+      <!-- рот: решётка с зубами -->
+      <g id="mouthGroup" transform="translate(600 585)">
+        <g id="mouth">
+          <rect x="-230" y="-34" width="460" height="68" rx="26" fill="url(#metalEdge)"/>
+          <rect x="-214" y="-22" width="428" height="44" rx="16" fill="#0a0b0f"/>
+          <g id="teeth" fill="#aeb6c0">
+            <!-- вертикальные перемычки решётки -->
+            <rect x="-186" y="-22" width="9" height="44"/>
+            <rect x="-141" y="-22" width="9" height="44"/>
+            <rect x="-96" y="-22" width="9" height="44"/>
+            <rect x="-51" y="-22" width="9" height="44"/>
+            <rect x="-4" y="-22" width="9" height="44"/>
+            <rect x="41" y="-22" width="9" height="44"/>
+            <rect x="86" y="-22" width="9" height="44"/>
+            <rect x="131" y="-22" width="9" height="44"/>
+            <rect x="176" y="-22" width="9" height="44"/>
+          </g>
+        </g>
+      </g>
+
+      <!-- сигара -->
+      <g id="cigar" transform="translate(770 588) rotate(18)">
+        <rect x="0" y="-11" width="120" height="22" rx="8" fill="#6b4a2f"/>
+        <rect x="0" y="-11" width="26" height="22" rx="8" fill="#8a6238"/>
+        <rect x="102" y="-11" width="18" height="22" rx="7" fill="#c96a3a"/>
+        <circle id="cigarTip" cx="118" cy="0" r="16" fill="url(#tipGlow)"/>
+        <g id="smoke" opacity="0">
+          <circle class="puff" cx="128" cy="-14" r="10" fill="#c9cdd4"/>
+          <circle class="puff" cx="138" cy="-34" r="13" fill="#c9cdd4"/>
+          <circle class="puff" cx="148" cy="-58" r="16" fill="#c9cdd4"/>
+        </g>
+      </g>
+    </svg>
+
+    <div id="caption" aria-live="polite"></div>
+
+    <div id="hud">
+      <button id="btnTalk" class="hud-btn" type="button">Реплика</button>
+      <button id="btnFull" class="hud-btn" type="button">Полный экран</button>
+      <button id="btnAbout" class="hud-btn" type="button">О проекте</button>
+    </div>
+    <div id="hint">Тапни по глазу, рту или лбу</div>
+  </div>
+  <script src="face.js"></script>
+</body>
+</html>
