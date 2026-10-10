@@ -12,9 +12,11 @@
 //   WEBAPP_URL — публичный адрес (для кнопок Mini App и og:image); иначе берётся из Host.
 //   TG_BOT_URL — ссылка на бота, напр. https://t.me/bender_prototype_bot (кнопка на лендинге).
 //   PORT       — порт HTTP, задаёт платформа.
+//   EYES_DIR   — куда класть последний кадр камеры (по умолчанию var/eyes; тесты переопределяют).
 
 'use strict';
 
+const crypto = require('crypto');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -113,6 +115,114 @@ function faceCommandsSince(since) {
   };
 }
 
+// ---- глаза и уши: камера и микрофон планшета --------------------------------
+// Включает только хозяин: /eyes on → бот даёт кнопку «Открыть глаза» с токеном.
+// Без токена морда не шлёт кадры и не слушает речь, даже если кто-то открыл её
+// по адресу. Токен живёт EYES_TTL (по умолчанию 15 мин), /eyes off гасит сразу.
+// Последний кадр лежит в var/eyes/latest.jpg (var/ в .gitignore), фразы — в памяти.
+
+const EYES_TTL_DEFAULT_MIN = 15;
+const EYES_TTL_MAX_MIN = 60;
+const EYES_FRAME_MAX_BYTES = 400 * 1024;
+const EYES_HEARD_LIMIT = 20;
+const EYES_HEARD_MAX_CHARS = 300;
+const EYES_JSON_MAX_BYTES = 4096;
+
+const eyes = { token: '', until: 0, frameAt: 0, nextHeardId: 1, heard: [] };
+
+// Каталог кадра. Переопределяется тестами (EYES_DIR); мозг читает тот же путь.
+function eyesDir() {
+  return env('EYES_DIR') || path.join(__dirname, 'var', 'eyes');
+}
+
+function eyesFramePath() {
+  return path.join(eyesDir(), 'latest.jpg');
+}
+
+function eyesActive() {
+  return Boolean(eyes.token) && Date.now() < eyes.until;
+}
+
+function eyesStart(minutes) {
+  const raw = Number(minutes);
+  const min = Math.min(Math.max(Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : EYES_TTL_DEFAULT_MIN, 1), EYES_TTL_MAX_MIN);
+  eyes.token = crypto.randomBytes(16).toString('base64url');
+  eyes.until = Date.now() + min * 60000;
+  return { token: eyes.token, minutes: min };
+}
+
+function eyesStop() {
+  eyes.token = '';
+  eyes.until = 0;
+}
+
+// Сравнение токена без утечки по времени.
+function eyesTokenOk(candidate) {
+  if (!eyesActive() || typeof candidate !== 'string' || !candidate) return false;
+  const a = Buffer.from(candidate);
+  const b = Buffer.from(eyes.token);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// Что морда узнаёт при опросе: включено ли ей (только для владельца токена).
+function eyesState(candidate) {
+  const on = eyesTokenOk(candidate);
+  return { on, leftSec: on ? Math.ceil((eyes.until - Date.now()) / 1000) : 0 };
+}
+
+async function eyesSaveFrame(buffer) {
+  await fs.promises.mkdir(eyesDir(), { recursive: true });
+  const target = eyesFramePath();
+  const tmp = `${target}.tmp`;
+  await fs.promises.writeFile(tmp, buffer);
+  await fs.promises.rename(tmp, target); // атомарно: мозг не читает полкадра
+  eyes.frameAt = Date.now();
+}
+
+function eyesHear(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, EYES_HEARD_MAX_CHARS);
+  if (!clean) return null;
+  const item = { id: eyes.nextHeardId++, text: clean, at: Date.now() };
+  eyes.heard.push(item);
+  if (eyes.heard.length > EYES_HEARD_LIMIT) eyes.heard.splice(0, eyes.heard.length - EYES_HEARD_LIMIT);
+  return item;
+}
+
+function clockText(ms) {
+  return new Date(ms).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+}
+
+function secondsAgoText(ms) {
+  return `${Math.max(0, Math.round((Date.now() - ms) / 1000))} с назад`;
+}
+
+// Читает тело запроса с лимитом. Лишнее не копим в памяти — только помечаем.
+function readBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let tooBig = false;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        tooBig = true;
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (tooBig) {
+        const error = new Error('too large');
+        error.code = 413;
+        reject(error);
+      } else {
+        resolve(Buffer.concat(chunks));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 // ---- человеческие тексты ----------------------------------------------------
 
 const FACE_EXPRESSIONS = ['idle', 'happy', 'angry', 'surprised'];
@@ -152,6 +262,9 @@ function helpText(admin) {
       'Хозяину:',
       '/say текст — морда на планшете скажет вслух',
       '/expr happy|angry|surprised|idle — выражение морды',
+      '/eyes on|off|status — камера и микрофон планшета (on на 15 мин, можно /eyes on 30)',
+      '/look — что видит камера последним кадром',
+      '/heard — что морда услышала за последнее время',
       '/ping — жив ли бот',
     );
   }
@@ -211,6 +324,7 @@ function answerFor(chatId, text) {
         '• мозг (brain/) — живёт без железа ✓\n' +
         '• память и лор сериала — в промпте ✓\n' +
         '• морда на планшете — глаза и рот на экране ✓\n' +
+        `• камера и микрофон планшета — ${eyesActive() ? 'включены' : 'выключены (/eyes on)'}\n` +
         '• лендинг + бот — готовы ✓\n' +
         `${adminLine()}\n` +
         `${faceLine()}\n` +
@@ -250,6 +364,54 @@ function answerFor(chatId, text) {
     return { text: `Морда: ${name}.`, buttons: [], face: [{ kind: 'expr', text: name }] };
   }
 
+  if (head === '/eyes') {
+    if (!admin) {
+      return { text: `Глаза и уши — хозяину. Камера не для чужих.\n${idNote}`, buttons: [] };
+    }
+    const sub = (words[1] || 'status').toLowerCase();
+    if (sub === 'off') {
+      eyesStop();
+      return { text: 'Глаза и уши выключены. Кадров и речи больше не будет.', buttons: [] };
+    }
+    if (sub === 'on') {
+      const session = eyesStart(words[2]);
+      return {
+        text:
+          `Глаза и уши включены на ${session.minutes} мин.\n` +
+          'Открой морду на планшете кнопкой ниже: камера и микрофон заработают после тапа по экрану ' +
+          '(iPad требует жест). Выключить: /eyes off.' +
+          (publicUrl() ? '' : '\nАдрес морды ещё не знаю: открой её из бота (/start) и повтори /eyes on.'),
+        buttons: [['Открыть глаза на планшете', `/?eyes=${session.token}`]],
+      };
+    }
+    if (sub !== 'status') {
+      return { text: 'Пиши так: /eyes on, /eyes on 30, /eyes off, /eyes status.', buttons: [] };
+    }
+    const left = eyesActive() ? `включены, ещё ${Math.ceil((eyes.until - Date.now()) / 60000)} мин` : 'выключены';
+    const frame = eyes.frameAt ? `кадр ${secondsAgoText(eyes.frameAt)}` : 'кадров ещё не было';
+    return {
+      text: `Глаза и уши: ${left}.\n• камера: ${frame}\n• услышано фраз: ${eyes.heard.length}`,
+      buttons: [],
+    };
+  }
+
+  if (head === '/look') {
+    if (!admin) return { text: `Что я вижу — хозяину.\n${idNote}`, buttons: [] };
+    if (!eyes.frameAt) {
+      return { text: 'Кадров ещё не было. Включи: /eyes on и открой морду на планшете.', buttons: [] };
+    }
+    return { text: `Вот что видит камера. Кадр ${secondsAgoText(eyes.frameAt)}.`, buttons: [], photo: true };
+  }
+
+  if (head === '/heard') {
+    if (!admin) return { text: `Что я слышу — хозяину.\n${idNote}`, buttons: [] };
+    if (!eyes.heard.length) {
+      return { text: 'Пока тихо. Морда слушает, только если включено: /eyes on.', buttons: [] };
+    }
+    const lines = eyes.heard.slice(-5).map((item) => `${clockText(item.at)} — «${item.text}»`);
+    return { text: `Услышал:\n${lines.join('\n')}`, buttons: [] };
+  }
+
   return {
     text: `Не понял, мясомешок. Жми /help — там всё есть.${admin ? '\nМорда говорит по команде /say текст.' : ''}`,
     buttons: [],
@@ -261,6 +423,47 @@ function answerFor(chatId, text) {
 function json(res, code, payload) {
   res.writeHead(code, { 'Content-Type': mimeTypes['.json'], 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(payload));
+}
+
+async function handleEyesUpload(req, res, pathname, query) {
+  if (req.method !== 'POST') {
+    json(res, 405, { ok: false, error: 'только POST' });
+    return;
+  }
+  // Токен: из ?token= или из заголовка X-Eyes-Token.
+  const token = query.get('token') || req.headers['x-eyes-token'] || '';
+  if (!eyesTokenOk(String(token))) {
+    await readBody(req, EYES_JSON_MAX_BYTES).catch(() => null); // сливаем тело, чтобы ответ ушёл чисто
+    json(res, 403, { ok: false, error: 'глаза выключены или токен устарел' });
+    return;
+  }
+
+  if (pathname === '/api/eyes/frame') {
+    const buffer = await readBody(req, EYES_FRAME_MAX_BYTES);
+    const isJpeg = buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+    if (!isJpeg) {
+      json(res, 415, { ok: false, error: 'нужен JPEG' });
+      return;
+    }
+    await eyesSaveFrame(buffer);
+    json(res, 200, { ok: true, bytes: buffer.length });
+    return;
+  }
+
+  // /api/eyes/heard — морда прислала распознанную фразу.
+  const raw = (await readBody(req, EYES_JSON_MAX_BYTES)).toString('utf-8');
+  let data = null;
+  try {
+    data = JSON.parse(raw);
+  } catch (_) {
+    data = null;
+  }
+  const item = eyesHear(data && data.text);
+  if (!item) {
+    json(res, 400, { ok: false, error: 'пустая фраза' });
+    return;
+  }
+  json(res, 200, { ok: true, id: item.id });
 }
 
 function createServer() {
@@ -292,7 +495,17 @@ function createServer() {
     if (pathname === '/api/face' || pathname === '/api/face/poll') {
       face.lastSeenAt = Date.now();
       const data = faceCommandsSince(query.get('since'));
-      json(res, 200, { ok: true, ...data });
+      // eyes: включены ли камера и микрофон для этой морды (только с токеном хозяина)
+      json(res, 200, { ok: true, ...data, eyes: eyesState(query.get('eyes')) });
+      return;
+    }
+
+    // Камера и микрофон планшета: кадры и распознанная речь. Только с токеном.
+    if (pathname === '/api/eyes/frame' || pathname === '/api/eyes/heard') {
+      handleEyesUpload(req, res, pathname, query).catch((error) => {
+        console.error('глаза:', error.message);
+        if (!res.headersSent) json(res, error.code === 413 ? 413 : 500, { ok: false, error: error.message });
+      });
       return;
     }
 
@@ -379,11 +592,29 @@ async function handleUpdate(update) {
   const answer = answerFor(chatId, msg.text);
   for (const command of answer.face || []) facePush(command.kind, command.text);
 
+  if (answer.photo) {
+    const sent = await tgSendPhoto(chatId, eyesFramePath(), answer.text).catch(() => null);
+    if (sent && sent.ok) return;
+    await tgCall('sendMessage', { chat_id: chatId, text: 'Кадр не отправился: файла нет или Telegram не принял. Попробуй ещё раз через пару секунд.' });
+    return;
+  }
+
   await tgCall('sendMessage', {
     chat_id: chatId,
     text: answer.text,
     reply_markup: keyboardFor(answer.buttons || []),
   });
+}
+
+// Фото из файла (кадр камеры) — multipart, без библиотек: FormData есть в Node 18+.
+async function tgSendPhoto(chatId, filePath, caption) {
+  const buffer = await fs.promises.readFile(filePath);
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  if (caption) form.append('caption', caption.slice(0, 1000));
+  form.append('photo', new Blob([buffer], { type: 'image/jpeg' }), 'bender-eyes.jpg');
+  const resp = await fetch(`${tgApiBase()}/bot${botToken()}/sendPhoto`, { method: 'POST', body: form });
+  return resp.json();
 }
 
 // Хозяин узнаёт, что бот поднялся и что ADMIN_ID прочитан.
@@ -475,6 +706,15 @@ module.exports = {
   adminIds,
   answerFor,
   createServer,
+  eyes,
+  eyesActive,
+  eyesDir,
+  eyesFramePath,
+  eyesHear,
+  eyesStart,
+  eyesState,
+  eyesStop,
+  eyesTokenOk,
   faceCommandsSince,
   facePush,
   fillPlaceholders,

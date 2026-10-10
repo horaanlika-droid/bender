@@ -297,6 +297,15 @@ class StubLLM:
                     lines.append(res.get("error", "?"))
                 else:
                     lines.append("Антенна качнулась. Ну, мысленно: серво у неё ещё нет.")
+            elif name == "look":
+                if not ok:
+                    lines.append(res.get("error", "?"))
+                else:
+                    age = (res.get("result") or {}).get("возраст_с", "?")
+                    lines.append(
+                        f"Кадр с планшета есть, снят {age} с назад. Что на нём — описать пока нечем: "
+                        "глаз-модели ещё нет, поэтому видеть тебя я не выдумываю."
+                    )
             elif name == "status":
                 if ok:
                     rep = "; ".join(f"{k} — {v}" for k, v in res.get("result", STATUS_RESULT).items())

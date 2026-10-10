@@ -12,11 +12,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("brain.dryrun")
+
+#: Кадр старше этого времени (сек) считается протухшим: камера молчит.
+LOOK_MAX_AGE_S = 120
 
 #: Каталог инструментов, обещанных телу (версия 0 из TOOLS.md).
 CATALOG: list[dict] = [
@@ -94,7 +99,10 @@ CATALOG: list[dict] = [
     },
     {
         "name": "look",
-        "description": "Кадр с камеры и описание сцены. Камеры пока нет.",
+        "description": (
+            "Последний кадр с камеры планшета (морда, включается хозяином через /eyes on). "
+            "Описания сцены пока нет: vision-модели не подключены."
+        ),
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     {
@@ -112,7 +120,8 @@ STATUS_RESULT = {
     "esp32": "не в сети — железо не куплено",
     "питание": "нет, стол",
     "серво": 0,
-    "глаза": "сухой лог",
+    "глаза": "кольцо WS2812 — сухой лог",
+    "камера": "планшет-морда, кадр через /eyes on",
     "сигара": "сухой лог",
     "касса": "см. BUDGET.md",
 }
@@ -122,6 +131,15 @@ def default_log_path() -> Path:
     """Сухой лог живёт в ``var/`` у корня репозитория (в .gitignore)."""
     root = Path(__file__).resolve().parent.parent
     return root / "var" / "dry_run.log"
+
+
+def default_eyes_dir() -> Path:
+    """Куда морда кладёт последний кадр камеры: ``var/eyes/`` (та же папка, что у app.js)."""
+    override = os.environ.get("EYES_DIR", "").strip()
+    if override:
+        return Path(override)
+    root = Path(__file__).resolve().parent.parent
+    return root / "var" / "eyes"
 
 
 def _validate(spec: dict, args: Any) -> str | None:
@@ -158,9 +176,10 @@ def _validate(spec: dict, args: Any) -> str | None:
 class ToolRuntime:
     """Исполнитель инструментов. Пока нет железа — честный сухой лог."""
 
-    def __init__(self, log_file: Path | None = None):
+    def __init__(self, log_file: Path | None = None, eyes_dir: Path | None = None):
         self.log_file = Path(log_file) if log_file else default_log_path()
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        self.eyes_dir = Path(eyes_dir) if eyes_dir else default_eyes_dir()
 
     # -- публичное ---------------------------------------------------------
 
@@ -194,12 +213,7 @@ class ToolRuntime:
             body.setdefault("side", "both")
 
         if name == "look":
-            res = {
-                "ok": False,
-                "tool": name,
-                "error": "камеры нет, старина. Глазею в темноту собственной головы.",
-                "dry_run": True,
-            }
+            res = self._look()
         elif name == "wave":
             res = {
                 "ok": False,
@@ -214,6 +228,39 @@ class ToolRuntime:
         return self._finish(res, args)
 
     # -- внутреннее --------------------------------------------------------
+
+    def _look(self) -> dict:
+        """Читает последний кадр морды. Без кадра или со старым — честный отказ."""
+        frame = self.eyes_dir / "latest.jpg"
+        try:
+            st = frame.stat()
+        except OSError:
+            return {
+                "ok": False,
+                "tool": "look",
+                "error": "кадра нет, старина. Глаза выключены или морда не открыта на планшете. "
+                "Хозяин включает их командой /eyes on.",
+                "dry_run": True,
+            }
+        age = int(time.time() - st.st_mtime)
+        if age > LOOK_MAX_AGE_S:
+            return {
+                "ok": False,
+                "tool": "look",
+                "error": f"кадр старый: {age} с. Камера молчит, проверь морду на планшете.",
+                "dry_run": True,
+            }
+        return {
+            "ok": True,
+            "tool": "look",
+            "result": {
+                "кадр": str(frame),
+                "возраст_с": age,
+                "байт": st.st_size,
+                "описание": "кадр получен, но описывать его пока нечем: vision-модели нет",
+            },
+            "dry_run": False,
+        }
 
     def _finish(self, res: dict, args: dict) -> dict:
         self._append_log(res, args)
