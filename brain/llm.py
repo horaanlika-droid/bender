@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
+from .lore import MIN_SCORE, STRONG_SCORE, first_sentences
 from .tools import STATUS_RESULT
 
 
@@ -53,6 +54,17 @@ _SAY_VERBS = r"(?:скажи|скажите|произнеси|повтори|п
 _SAY_RE = re.compile(rf"{_SAY_VERBS}[\s,.:!«»\"'—-]*(.*)$", re.I | re.S)
 
 _WINK_RE = re.compile(r"подмигн|моргн", re.I)
+
+#: Вопрос к памяти: «помнишь…», «расскажи про…», «кто такой…», «что за серия…».
+_LORE_RE = re.compile(
+    r"помни|вспомн|напомни|расскажи(?:те)?\s+(?:мне\s+)?(?:про|о|об|обо)\b|поведай\s+(?:про|о|об)\b"
+    r"|кто\s+так(?:ой|ая|ие|ов)|что\s+так(?:ое|ой|ая)|что\s+за\b|кем\s+был|\bсери[яиюйе]"
+    r"|эпизод|\bсезон|\bфильм|как\s+звали|как\s+зовут|знаешь\s+(?:про|о|об|кто|что|ли)\b",
+    re.I,
+)
+_EPISODE_ASK_RE = re.compile(r"сери[яиюйе]|эпизод|\bфильм", re.I)
+_SELF_RE = re.compile(r"о себе|про себя|кто ты\b|биограф", re.I)
+_QUESTION_RE = re.compile(r"\?|^(?:а\s+)?(?:кто|что|где|когда|почему|зачем|как|какой|какая|какое|чем|сколько)\b", re.I)
 _CLOSE_RE = re.compile(r"закр|закры|захлопн|опусти", re.I)
 
 _SAY_POOL = [
@@ -71,6 +83,17 @@ _FALLBACK_POOL = [
     "Слышу тебя, старина. Делаю вид, что мне не всё равно.",
     "Это было почти интересно. Почти. Кусай мой блестящий металлический зад.",
     "Не отвлекай робота от безделья. Это моя работа.",
+]
+_LORE_OPENERS = [
+    "Помню, старина. {label}: {text}",
+    "Ещё бы не помнить. {label}: {text}",
+    "Как сейчас помню — {label}. {text}",
+    "А, это. {label}: {text}",
+]
+_FORGOT_POOL = [
+    "Не помню такого — значит, не было. А если и было, то без меня, а без меня ничего важного не бывает.",
+    "Не помню, мясомешок. Мои банки памяти на такую ерунду не разменивались.",
+    "Не помню. Может, это было в серии, где меня не было? Таких не бывает. Значит, выдумка.",
 ]
 _SONG = "Ля-ля-ля! Славный был денёк! Мимо нот, зато от души, старина."
 _JOKE = "Заходит робот в бар, а бар — в робота. Кусай мой блестящий металлический зад!"
@@ -119,7 +142,9 @@ def _say_phrase(text: str, tail: str) -> str:
     if verb.startswith("расскажи") or verb.startswith("поведай"):
         if re.search(r"о себе|кто ты|биограф", tail, re.I):
             return _BIO
-        return tail or _JOKE
+        if not tail or re.fullmatch(r"(?:мне\s+)?(?:анекдот|шутку|прикол)\w*", tail, re.I):
+            return _JOKE
+        return tail
     if tail:
         return tail
     return random.choice(_SAY_POOL)
@@ -139,9 +164,15 @@ class StubLLM:
         system_prompt: str = "",
         tools: list[dict] | None = None,
         history: list[dict] | None = None,
+        memories: list[dict] | None = None,
     ) -> LLMReply:
         t = user_text.strip().lower()
         calls: list[dict] = []
+        memories = [m for m in memories or [] if m.get("score", 0) >= MIN_SCORE]
+
+        # Вопрос о прошлом — отвечает память, а не тело.
+        if _LORE_RE.search(t) and not _SELF_RE.search(t):
+            return LLMReply(text=self._lore_answer(memories, episode=bool(_EPISODE_ASK_RE.search(t))))
 
         def add(tool: str, **args) -> None:
             calls.append({"tool": tool, "args": args})
@@ -164,6 +195,14 @@ class StubLLM:
             add("status")
 
         say_match = _SAY_RE.search(t)
+        if (
+            not calls
+            and not say_match
+            and memories
+            and memories[0]["score"] >= STRONG_SCORE
+            and _QUESTION_RE.search(t)
+        ):
+            return LLMReply(text=self._lore_answer(memories))
         draft = ""
         if say_match:
             phrase = _say_phrase(t, say_match.group(1))
@@ -177,6 +216,28 @@ class StubLLM:
             return LLMReply(text=self._rng.choice(_FALLBACK_POOL))
 
         return LLMReply(text=draft, tool_calls=calls)
+
+    def _lore_answer(self, memories: list[dict], episode: bool = False) -> str:
+        """Ответ из памяти: суть верхнего куска лора; нет куска — «не помню».
+
+        Спросили про серию — берём лучший кусок-серию, даже если досье героя выше.
+        """
+        if not memories:
+            return self._rng.choice(_FORGOT_POOL)
+        top = memories[0]
+        if episode:
+            top = next((m for m in memories if m.get("code")), top)
+        text = first_sentences(top["text"], n=2, limit=350)
+        label = top["title"].split(" (")[0]
+        answer = self._rng.choice(_LORE_OPENERS).format(label=label, text=text)
+        extra = [
+            m["title"]
+            for m in memories[1:]
+            if m.get("code") and m["score"] >= 0.6 * top["score"] and m["title"] != top["title"]
+        ]
+        if extra:
+            answer += " Ещё всплывает: " + "; ".join(extra[:2]) + "."
+        return answer
 
     def refine(self, user_text: str, executed: list[tuple[dict, dict]], reply: LLMReply) -> str:
         """Финальная реплика после исполнения: учитывает, что железо ответило."""
@@ -274,7 +335,9 @@ class OllamaLLM:
         system_prompt: str,
         tools: list[dict] | None = None,
         history: list[dict] | None = None,
+        memories: list[dict] | None = None,
     ) -> LLMReply:
+        # memories уже вшиты в system_prompt рантаймом; параметр — для единого протокола.
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(history or [])
         messages.append({"role": "user", "content": user_text})
