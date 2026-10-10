@@ -266,9 +266,13 @@ function setLink(ok) {
 
 async function pollCommands() {
   try {
-    const res = await fetch(`api/face?since=${lastCommandId}`, { cache: 'no-store' });
+    // токен глаз (если хозяин включил камеру) уходит в опрос — сервер ответит, включено ли
+    const eyesToken = window.BenderEyes ? window.BenderEyes.token() : '';
+    const eyesParam = eyesToken ? `&eyes=${encodeURIComponent(eyesToken)}` : '';
+    const res = await fetch(`api/face?since=${lastCommandId}${eyesParam}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
+    if (window.BenderEyes) window.BenderEyes.sync(data.eyes || { on: false });
 
     for (const command of data.commands || []) {
       const id = Number(command.id) || 0;

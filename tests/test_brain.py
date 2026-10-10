@@ -82,11 +82,16 @@ class Intents(unittest.TestCase):
         self.assertFalse(tools["wave"]["ok"])
         self.assertIn("рук нет", tools["wave"]["error"])
 
-    def test_look_without_camera(self):
-        out = self.brain.handle("что ты видишь?")
+    def test_look_without_frame(self):
+        # кадра нет (морда не открыта или глаза выключены) — честный отказ, а не выдумка
+        with tempfile.TemporaryDirectory() as empty:
+            brain = make_brain(speak=False, log_file=Path(self._tmp.name) / "dry_run3.log")
+            brain.executor.eyes_dir = Path(empty)
+            out = brain.handle("что ты видишь?")
         tools = executed_tools(out)
         self.assertFalse(tools["look"]["ok"])
-        self.assertIn("камеры нет", tools["look"]["error"])
+        self.assertIn("кадра нет", tools["look"]["error"])
+        self.assertIn("/eyes on", tools["look"]["error"])
 
     def test_status_ok(self):
         out = self.brain.handle("статус")
@@ -105,6 +110,52 @@ class Intents(unittest.TestCase):
         out = self.brain.handle("привет")
         self.assertEqual(out["executed"], [])
         self.assertTrue(out["reply"])
+
+
+class LookFrame(unittest.TestCase):
+    """``look`` читает кадр, который кладёт морда (var/eyes/latest.jpg)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.eyes = Path(self._tmp.name) / "eyes"
+        self.eyes.mkdir()
+        self.runtime = ToolRuntime(log_file=Path(self._tmp.name) / "dry_run.log", eyes_dir=self.eyes)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_fresh_frame_is_read(self):
+        frame = self.eyes / "latest.jpg"
+        frame.write_bytes(b"\xff\xd8\xff\xe0fake")
+        res = self.runtime.execute({"tool": "look", "args": {}})
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["result"]["байт"], frame.stat().st_size)
+        self.assertLessEqual(res["result"]["возраст_с"], 5)
+        self.assertIn("vision", res["result"]["описание"])
+
+    def test_stale_frame_refused(self):
+        import os
+        import time
+        frame = self.eyes / "latest.jpg"
+        frame.write_bytes(b"\xff\xd8\xff\xe0old")
+        old = time.time() - 600
+        os.utime(frame, (old, old))
+        res = self.runtime.execute({"tool": "look", "args": {}})
+        self.assertFalse(res["ok"])
+        self.assertIn("старый", res["error"])
+
+    def test_eyes_dir_from_env(self):
+        import os
+        from brain.tools import default_eyes_dir
+        saved = os.environ.get("EYES_DIR")
+        os.environ["EYES_DIR"] = str(self.eyes)
+        try:
+            self.assertEqual(default_eyes_dir(), self.eyes)
+        finally:
+            if saved is None:
+                os.environ.pop("EYES_DIR", None)
+            else:
+                os.environ["EYES_DIR"] = saved
 
 
 class CatalogAndValidation(unittest.TestCase):

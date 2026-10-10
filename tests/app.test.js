@@ -12,6 +12,11 @@ process.env.BOT_TOKEN = '';
 process.env.ADMIN_ID = '777001, 777002';
 process.env.WEBAPP_URL = 'https://bender.example';
 process.env.TG_BOT_URL = 'https://t.me/bender_test_bot';
+// Кадры камеры пишем во временную папку, не в настоящий var/.
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+process.env.EYES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bender-eyes-'));
 
 const app = require('../app.js');
 
@@ -335,4 +340,162 @@ test('публичный адрес берётся из Host, если WEBAPP_UR
   } finally {
     process.env.WEBAPP_URL = saved;
   }
+});
+
+// ---- глаза и уши: камера и микрофон планшета --------------------------------
+
+const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 7)]);
+
+function resetEyes() {
+  app.eyesStop();
+  app.eyes.heard.length = 0;
+  app.eyes.frameAt = 0;
+  fs.rmSync(app.eyesDir(), { recursive: true, force: true });
+}
+
+async function post(base, route, body, headers) {
+  return fetch(`${base}${route}`, { method: 'POST', headers: headers || {}, body });
+}
+
+test('/eyes on: админ получает одноразовую ссылку с токеном, чужой — отказ', () => {
+  resetEyes();
+  const stranger = app.answerFor(STRANGER, '/eyes on');
+  assert.equal(app.eyesActive(), false, 'чужой не включает камеру');
+  assert.match(stranger.text, /хозяину/);
+
+  const admin = app.answerFor(ADMIN, '/eyes on 30');
+  assert.equal(app.eyesActive(), true);
+  assert.match(admin.text, /30 мин/);
+  const link = admin.buttons[0][1];
+  assert.match(link, /^\/\?eyes=[A-Za-z0-9_-]{20,}$/, 'токен в ссылке морды');
+  assert.equal(admin.text.includes(app.eyes.token), false, 'токен не светится текстом, только кнопкой');
+  resetEyes();
+});
+
+test('/eyes: время жизни режется до часа, мусор — 15 минут', () => {
+  resetEyes();
+  assert.match(app.answerFor(ADMIN, '/eyes on 9999').text, /60 мин/);
+  assert.match(app.answerFor(ADMIN, '/eyes on чепуха').text, /15 мин/);
+  resetEyes();
+});
+
+test('/eyes off гасит сессию, токен перестаёт работать', () => {
+  resetEyes();
+  app.answerFor(ADMIN, '/eyes on');
+  const token = app.eyes.token;
+  assert.equal(app.eyesTokenOk(token), true);
+  app.answerFor(ADMIN, '/eyes off');
+  assert.equal(app.eyesTokenOk(token), false);
+  assert.match(app.answerFor(ADMIN, '/eyes status').text, /выключены/);
+  resetEyes();
+});
+
+test('сессия истекает сама: старый токен больше не открывает камеру', () => {
+  resetEyes();
+  app.answerFor(ADMIN, '/eyes on 1');
+  const token = app.eyes.token;
+  app.eyes.until = Date.now() - 1;
+  assert.equal(app.eyesTokenOk(token), false);
+  assert.equal(app.eyesState(token).on, false);
+  resetEyes();
+});
+
+test('/api/face: состояние глаз видно только владельцу токена', async () => {
+  resetEyes();
+  app.answerFor(ADMIN, '/eyes on');
+  const token = app.eyes.token;
+  await withServer(async (base) => {
+    const stranger = await (await fetch(`${base}/api/face?since=0`)).json();
+    assert.equal(stranger.eyes.on, false, 'без токена — выключено');
+    const owner = await (await fetch(`${base}/api/face?since=0&eyes=${token}`)).json();
+    assert.equal(owner.eyes.on, true);
+    assert.ok(owner.eyes.leftSec > 0);
+    const wrong = await (await fetch(`${base}/api/face?since=0&eyes=нет`)).json();
+    assert.equal(wrong.eyes.on, false);
+  });
+  resetEyes();
+});
+
+test('кадр: без токена — 403, с токеном и JPEG — сохраняется, не JPEG — 415', async () => {
+  resetEyes();
+  app.answerFor(ADMIN, '/eyes on');
+  const token = app.eyes.token;
+  await withServer(async (base) => {
+    const noToken = await post(base, '/api/eyes/frame', JPEG, { 'Content-Type': 'image/jpeg' });
+    assert.equal(noToken.status, 403);
+    assert.equal(fs.existsSync(app.eyesFramePath()), false, 'чужой кадр не пишется');
+
+    const ok = await post(base, `/api/eyes/frame?token=${token}`, JPEG, { 'Content-Type': 'image/jpeg' });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(fs.readFileSync(app.eyesFramePath()), JPEG);
+    assert.ok(app.eyes.frameAt > 0);
+    assert.equal(fs.existsSync(`${app.eyesFramePath()}.tmp`), false, 'атомарная запись: tmp убран');
+
+    const notJpeg = await post(base, `/api/eyes/frame?token=${token}`, Buffer.from('hello'));
+    assert.equal(notJpeg.status, 415);
+  });
+  resetEyes();
+});
+
+test('кадр: слишком большой — 413, на диск не пишется', async () => {
+  resetEyes();
+  app.answerFor(ADMIN, '/eyes on');
+  const token = app.eyes.token;
+  await withServer(async (base) => {
+    const huge = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(500 * 1024)]);
+    const res = await post(base, `/api/eyes/frame?token=${token}`, huge);
+    assert.equal(res.status, 413);
+    assert.equal(fs.existsSync(app.eyesFramePath()), false);
+  });
+  resetEyes();
+});
+
+test('речь: фраза морды уходит в память, пустая и без токена — отказ', async () => {
+  resetEyes();
+  app.answerFor(ADMIN, '/eyes on');
+  const token = app.eyes.token;
+  await withServer(async (base) => {
+    const stranger = await post(base, '/api/eyes/heard', JSON.stringify({ text: 'привет' }));
+    assert.equal(stranger.status, 403);
+
+    const ok = await post(base, `/api/eyes/heard?token=${token}`, JSON.stringify({ text: '  Бендер,   ты тут? ' }));
+    assert.equal(ok.status, 200);
+    assert.equal(app.eyes.heard.length, 1);
+    assert.equal(app.eyes.heard[0].text, 'Бендер, ты тут?', 'пробелы схлопнуты');
+
+    const empty = await post(base, `/api/eyes/heard?token=${token}`, JSON.stringify({ text: '   ' }));
+    assert.equal(empty.status, 400);
+    const broken = await post(base, `/api/eyes/heard?token=${token}`, '{не json');
+    assert.equal(broken.status, 400);
+  });
+  resetEyes();
+});
+
+test('речь: память не растёт бесконечно', () => {
+  resetEyes();
+  for (let i = 0; i < 40; i += 1) app.eyesHear(`фраза ${i}`);
+  assert.equal(app.eyes.heard.length, 20);
+  assert.equal(app.eyes.heard[19].text, 'фраза 39');
+  resetEyes();
+});
+
+test('/heard и /look: хозяину, без кадра — подсказка; с кадром — фото', () => {
+  resetEyes();
+  assert.match(app.answerFor(ADMIN, '/look').text, /Кадров ещё не было/);
+  assert.match(app.answerFor(ADMIN, '/heard').text, /Пока тихо/);
+  assert.match(app.answerFor(STRANGER, '/look').text, /хозяину/);
+  assert.equal(app.answerFor(STRANGER, '/look').photo, undefined);
+
+  app.eyes.frameAt = Date.now();
+  app.eyesHear('Бендер, ты тут?');
+  const look = app.answerFor(ADMIN, '/look');
+  assert.equal(look.photo, true, 'с кадром ответ просит отправить фото');
+  assert.match(app.answerFor(ADMIN, '/heard').text, /Бендер, ты тут\?/);
+  assert.match(app.answerFor(STRANGER, '/heard').text, /хозяину/);
+  resetEyes();
+});
+
+test('/help: команды глаз видны хозяину, чужому — нет', () => {
+  assert.match(app.answerFor(ADMIN, '/help').text, /\/eyes on/);
+  assert.doesNotMatch(app.answerFor(STRANGER, '/help').text, /\/eyes/);
 });

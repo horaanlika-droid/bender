@@ -121,6 +121,36 @@ html, body {
 #link.on { color: rgba(126, 224, 143, 0.9); border-color: rgba(94, 224, 122, 0.45); }
 #link.on .dot { background: #5ee07a; box-shadow: 0 0 8px rgba(94, 224, 122, 0.8); }
 
+/* камера и микрофон планшета (eyes.js): видна только с токеном хозяина */
+#eyes {
+  position: absolute;
+  top: max(58px, calc(env(safe-area-inset-top) + 58px));
+  right: max(16px, calc(env(safe-area-inset-right) + 16px));
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(20, 23, 29, 0.7);
+  border: 1px solid rgba(120, 130, 145, 0.35);
+  color: rgba(200, 208, 218, 0.55);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+#eyes[hidden] { display: none; }
+#eyes .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6a7280;
+}
+#eyes.wait { color: rgba(242, 201, 76, 0.9); border-color: rgba(242, 201, 76, 0.45); }
+#eyes.wait .dot { background: #f2c94c; }
+#eyes.on { color: rgba(126, 224, 143, 0.9); border-color: rgba(94, 224, 122, 0.45); }
+#eyes.on .dot { background: #5ee07a; box-shadow: 0 0 8px rgba(94, 224, 122, 0.8); }
+
 /* дым от сигары */
 .puff {
   filter: blur(2px);
