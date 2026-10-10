@@ -248,6 +248,52 @@ $('btnAbout').addEventListener('click', () => {
   else window.location.href = 'about.html';
 });
 
+// ---- связь с ботом: хозяин включил реплику из Telegram ---------------------
+// Морда спрашивает сервер, нет ли команды (/say, /expr), и выполняет её.
+// Порядок такой же, как в мозге: сначала действие, потом речь.
+const linkPill = $('link');
+let lastCommandId = 0;
+
+// Команду, отправленную давно (планшет лежал выключенным), не проигрываем:
+// сказанное хозяином «сейчас» звучит сразу, старое — не всплывает само.
+const MAX_COMMAND_AGE_MS = 30000;
+
+function setLink(ok) {
+  if (!linkPill) return;
+  linkPill.classList.toggle('on', ok);
+  linkPill.title = ok ? 'Связь с ботом: есть' : 'Связь с ботом: нет';
+}
+
+async function pollCommands() {
+  try {
+    const res = await fetch(`api/face?since=${lastCommandId}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+
+    for (const command of data.commands || []) {
+      const id = Number(command.id) || 0;
+      if (id > lastCommandId) lastCommandId = id;
+      if (Date.now() - (Number(command.at) || 0) > MAX_COMMAND_AGE_MS) continue;
+
+      if (command.kind === 'say') {
+        greet();
+        setExpression('happy');
+        speak(command.text);
+      } else if (command.kind === 'expr') {
+        greet();
+        setExpression(command.text);
+        setTimeout(() => { if (!S.talking) setExpression('idle'); }, 2600);
+      }
+    }
+    setLink(true);
+  } catch (_) {
+    setLink(false); // нет связи — морда просто живёт сама
+  }
+}
+
+setInterval(pollCommands, 2000);
+pollCommands();
+
 // клавиатура (для отладки на десктопе)
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); $('btnTalk').click(); }

@@ -7,6 +7,8 @@
   <meta property="og:title" content="BENDER — прототип робота из «Футурамы»">
   <meta property="og:description" content="Железный зад с ложной биографией и инструментами в физический мир. Голова — планшет с веб-мордой, тело собирается вокруг.">
   <meta property="og:image" content="%PUBLIC_URL%/images/hero.jpg">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon.svg">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="about.css">
 </head>
@@ -36,8 +38,9 @@
       </article>
       <article class="card">
         <h2>Морда на планшете</h2>
-        <p>Голова — это iPad в напечатанном корпусе: глаза и рот живут в веб-приложении. Моргает, подмигивает,
-        говорит коронные фразы. Экран вставляется в голову — и она оживает.</p>
+        <p>Голова — это iPad в напечатанном корпусе: <b>глаза и рот живут на экране</b>, моргают, следят,
+        говорят коронные фразы. Хозяин управляет из Telegram: <code>/say текст</code> — морда скажет вслух,
+        <code>/expr happy</code> — выражение.</p>
       </article>
       <article class="card">
         <h2>Тело собирается</h2>

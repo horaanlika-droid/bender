@@ -92,6 +92,35 @@ html, body {
 }
 #hint.hide { opacity: 0; }
 
+/* индикатор связи с ботом (морда слушает /say из Telegram) */
+#link {
+  position: absolute;
+  top: max(16px, calc(env(safe-area-inset-top) + 16px));
+  right: max(16px, calc(env(safe-area-inset-right) + 16px));
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(20, 23, 29, 0.7);
+  border: 1px solid rgba(120, 130, 145, 0.35);
+  color: rgba(200, 208, 218, 0.55);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: color 0.3s ease, border-color 0.3s ease;
+  pointer-events: none;
+}
+#link .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6a7280;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+#link.on { color: rgba(126, 224, 143, 0.9); border-color: rgba(94, 224, 122, 0.45); }
+#link.on .dot { background: #5ee07a; box-shadow: 0 0 8px rgba(94, 224, 122, 0.8); }
+
 /* дым от сигары */
 .puff {
   filter: blur(2px);

@@ -11,6 +11,9 @@
   <meta property="og:title" content="БЕНДЕР — морда на планшете">
   <meta property="og:description" content="Глаза и рот живут на экране: вставь планшет в напечатанную голову.">
   <meta property="og:image" content="%PUBLIC_URL%/images/hero.jpg">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="apple-mobile-web-app-title" content="Бендер">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="face.css">
 </head>
@@ -133,6 +136,7 @@
       <button id="btnFull" class="hud-btn" type="button">Полный экран</button>
       <button id="btnAbout" class="hud-btn" type="button">О проекте</button>
     </div>
+    <div id="link" title="Связь с ботом"><span class="dot"></span><span class="txt">бот</span></div>
     <div id="hint">Тапни по глазу, рту или лбу</div>
   </div>
   <script src="face.js"></script>
