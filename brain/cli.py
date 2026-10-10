@@ -5,6 +5,7 @@
     python -m brain                 # диалог
     python -m brain подмигни        # одна реплика и выход
     python -m brain --llm ollama    # слот под локальную модель
+    python -m brain --recall Сеймур # что всплывает в памяти (лор) по запросу
 """
 
 from __future__ import annotations
@@ -13,13 +14,15 @@ import argparse
 import os
 import sys
 
+from .lore import format_memories, get_index, recall
 from .runtime import make_brain
 from .tools import format_call_line
 
 BANNER = """\
-БЕНДЕР, серия 22, серийный номер 2716057. Рантайм-мозг без железа: раунд 3.
-Характер уже здесь, тело ещё в магазине. Движок: {engine}.
-Попробуй: подмигни · закури · открой люк · скажи «кусай мой блестящий зад» · статус · что видишь
+БЕНДЕР, серия 22, серийный номер 2716057. Рантайм-мозг без железа: раунд 4.
+Характер уже здесь, тело ещё в магазине. Движок: {engine}. Память: {memory}.
+Попробуй: подмигни · закури · открой люк · статус · что видишь
+Или спроси о прошлом: помнишь Сеймура? · кто такой Флексо · как ты стал богом?
 Выход: «выход» или Ctrl-D.
 """
 
@@ -35,7 +38,13 @@ def _print_outcome(outcome: dict, file=None) -> None:
 
 
 def _repl(brain) -> int:
-    print(BANNER.format(engine=brain.engine), flush=True)
+    if brain.lore:
+        codes = get_index().episodes()
+        films = sum(1 for c in codes if c.startswith("F"))
+        memory = f"канон, {len(codes) - films} серии + {films} фильма"
+    else:
+        memory = "выключена"
+    print(BANNER.format(engine=brain.engine, memory=memory), flush=True)
     while True:
         try:
             line = input("мясомешок> ").strip()
@@ -63,7 +72,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-say", action="store_true",
                         help="не звать say автоматически (чистая отладка текста)")
     parser.add_argument("--log-file", help="файл сухого лога (по умолчанию var/dry_run.log)")
+    parser.add_argument("--no-lore", action="store_true", help="не подкладывать лор в промпт (амнезия)")
+    parser.add_argument("--recall", metavar="ЗАПРОС", help="показать, что всплывает в памяти, и выйти")
+    parser.add_argument("-k", type=int, default=3, help="сколько кусков памяти показывать с --recall")
     args = parser.parse_args(argv)
+
+    if args.recall:
+        hits = recall(args.recall, k=args.k)
+        if not hits:
+            print("Не помню такого — значит, не было.")
+            return 1
+        for h in hits:
+            print(f"[{h['score']:6.2f}] {h['path']}  ({h['source']})")
+        print()
+        print(format_memories(hits))
+        return 0
 
     brain = make_brain(
         kind=args.llm,
@@ -71,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         log_file=args.log_file,
         model=args.model,
         host=args.host,
+        lore=not args.no_lore,
     )
 
     text = " ".join(args.text).strip()

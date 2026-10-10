@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .lore import format_memories
+
 HERE = Path(__file__).resolve().parent
 PERSONA_FILE = HERE / "PERSONA.md"
 TOOLS_DOC = HERE / "TOOLS.md"
@@ -15,14 +17,29 @@ def load_persona(path: Path | None = None) -> str:
     return p.read_text(encoding="utf-8")
 
 
-def build_system_prompt(persona: str | None = None, tools: list[dict] | None = None) -> str:
-    """Системный промпт = ``PERSONA.md`` + каталог tools + правила тела."""
+def build_system_prompt(
+    persona: str | None = None,
+    tools: list[dict] | None = None,
+    memories: list[dict] | None = None,
+) -> str:
+    """Системный промпт = ``PERSONA.md`` + всплывший лор + каталог tools + правила тела."""
     persona = persona if persona is not None else load_persona()
     lines: list[str] = [
         "Ты — Бендер. Всё, что написано ниже, — твои воспоминания. Не притворяйся ими, а помни.",
         "",
         persona,
         "",
+    ]
+    if memories:
+        lines += [
+            "## Всплыло в памяти (канон)",
+            "Это твои настоящие воспоминания по теме реплики. Опирайся на них; чего здесь и в "
+            "персоне нет — честно скажи «не помню», не выдумывай серий, героев и сюжетов.",
+            "",
+            format_memories(memories),
+            "",
+        ]
+    lines += [
         "## Доступные инструменты (вызывать можно только их)",
     ]
     for t in tools or []:
@@ -37,5 +54,6 @@ def build_system_prompt(persona: str | None = None, tools: list[dict] | None = N
         "- Для речи вслух обязательно зови `say` с текстом ответа.",
         "- Если результат инструмента `ok: false` — не ври, что тело это сделало.",
         "- Отвечай в характере: коротко, разговорно, стиль русского дубляжа.",
+        "- Вспоминать — не действие тела: для памяти инструменты не нужны.",
     ]
     return "\n".join(lines)
