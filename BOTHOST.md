@@ -7,12 +7,13 @@ BotHost клонирует репозиторий и поднимает `app.js`
 
 | Файл | Роль |
 |---|---|
-| `app.js` | HTTP-статика из `public/`, `/health`, `/api/face`, Telegram-бот (long polling) |
+| `app.js` | HTTP-статика из `public/`, `/health`, `/api/face`, `/api/recall`, Telegram-бот (long polling) |
+| `lib/lore.js`, `lib/brain.js` | память и мозг на Node: те же `brain/lore/*.md`, что у python-мозга |
 | `public/index.html` | **морда** — глаза и рот для планшета в голове (управляется из бота) |
 | `public/about.html` | лендинг проекта |
 | `public/manifest.webmanifest`, `public/icon.svg` | чтобы планшет открывал морду как приложение (standalone) |
 | `package.json` | `npm start` → `node app.js`, `npm test` → тесты Node-слоя |
-| `Dockerfile` | явная сборка для BotHost (рабочая папка вне `/app`, как в их FAQ) |
+| `Dockerfile` | явная сборка для BotHost (рабочая папка вне `/app`, как в их FAQ); копирует `lib/`, `brain/`, `public/` |
 
 ## Что вписать: две переменные
 
@@ -32,6 +33,12 @@ BotHost клонирует репозиторий и поднимает `app.js`
 | `WEBAPP_URL` | публичный адрес, напр. `https://bender.bothost.ru` — для кнопок Mini App и `og:image` | адрес выводится из Host первого запроса |
 | `TG_BOT_URL` | ссылка на бота, напр. `https://t.me/bender_prototype_bot` — кнопка «Написать боту» на лендинге | кнопка на лендинге скрыта |
 | `PORT` | порт HTTP | задаёт платформа |
+| `LLM_URL` | адрес живой модели, напр. `http://127.0.0.1:11434` (Ollama) или `https://…/v1` | отвечает заглушка на правилах, память всё равно работает |
+| `LLM_MODEL`, `LLM_KIND`, `LLM_API_KEY`, `LLM_TIMEOUT` | уточнения к `LLM_URL` (модель, `ollama`/`openai`, ключ, таймаут в секундах) | разумные умолчания |
+
+Без `LLM_URL` Бендер всё равно отвечает по канону: память (`lib/lore.js`) ищет куски в
+`brain/lore/*.md`, а `lib/brain.js` собирает ответ на правилах. `LLM_URL` лишь заменяет
+формулировки на живую модель, промпт с памятью уходит ей целиком.
 
 ## Как узнать ADMIN_ID (полминуты)
 

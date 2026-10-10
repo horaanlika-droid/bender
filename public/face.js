@@ -106,18 +106,58 @@ function setExpression(name) {
   }
 }
 
-// ---- речь -----------------------------------------------------------------
+// ---- голос ----------------------------------------------------------------
+// Голос железный: низкий тон, ровный темп. Хозяин может переопределить его из
+// Telegram (/voice bass|bender|fast|pitch=0.4 rate=1.1) — настройки приезжают
+// вместе с командами морды. А на самом планшете кнопка «Голос» листает русские
+// голоса системы: у iPad их несколько, и запоминаем выбор для этой морды.
+const VOICE_STORE = 'bender.voice';
+const TUNE_DEFAULT = { rate: 1.0, pitch: 0.55 };
+
+let tune = { ...TUNE_DEFAULT };
+let ruVoices = [];
+let voiceIndex = -1;
 let ruVoice = null;
-function pickVoice() {
-  const voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
-  ruVoice =
-    voices.find((v) => /ru/i.test(v.lang) && /google|yandex|milena|female/i.test(v.name)) ||
-    voices.find((v) => /ru/i.test(v.lang)) ||
-    null;
+let pickedVoiceName = '';
+
+try {
+  pickedVoiceName = localStorage.getItem(VOICE_STORE) || '';
+} catch (_) { /* приватный режим — не беда */ }
+
+//: Хорошие голоса — вперёд: сначала Яндекс/Google/системные, потом остальные.
+function voiceRank(v) {
+  const name = `${v.name} ${v.voiceURI || ''}`.toLowerCase();
+  if (/yandex|яндекс/.test(name)) return 0;
+  if (/google/.test(name)) return 1;
+  if (/milena|alena|alyona|katya|dmitr|yuri|pavel|maxim|милена|алена/.test(name)) return 2;
+  return 3;
 }
+
+function refreshVoices() {
+  const voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+  ruVoices = voices.filter((v) => /^ru/i.test(v.lang)).sort((a, b) => voiceRank(a) - voiceRank(b));
+  const byName = ruVoices.findIndex((v) => v.name === pickedVoiceName);
+  voiceIndex = byName >= 0 ? byName : 0;
+  ruVoice = ruVoices[voiceIndex] || null;
+}
+
 if (window.speechSynthesis) {
-  pickVoice();
-  speechSynthesis.onvoiceschanged = pickVoice;
+  refreshVoices();
+  speechSynthesis.onvoiceschanged = refreshVoices;
+}
+
+//: Голос, выставленный хозяином (/voice) — приходит с каждым опросом сервера.
+function applyTune(next) {
+  if (!next) return;
+  const rate = Number(next.rate);
+  const pitch = Number(next.pitch);
+  if (Number.isFinite(rate) && rate >= 0.5 && rate <= 2) tune.rate = rate;
+  if (Number.isFinite(pitch) && pitch >= 0 && pitch <= 2) tune.pitch = pitch;
+}
+
+function voiceLabel() {
+  if (!ruVoice) return 'системный';
+  return ruVoice.name.replace(/\s*\(.*\)\s*$/, '');
 }
 
 const caption = $('caption');
@@ -145,8 +185,8 @@ function speak(text) {
   const u = new SpeechSynthesisUtterance(text);
   if (ruVoice) u.voice = ruVoice;
   u.lang = 'ru-RU';
-  u.rate = 1.0;
-  u.pitch = 0.65; // железный бас
+  u.rate = tune.rate;
+  u.pitch = tune.pitch; // железный бас: низко и ровно
   u.onend = () => { S.talking = false; };
   u.onerror = () => { S.talking = false; };
   speechSynthesis.speak(u);
@@ -225,6 +265,24 @@ $('btnTalk').addEventListener('click', () => {
   setTimeout(() => { if (!S.talking) setExpression('idle'); }, 3200);
 });
 
+//: Кнопка «Голос»: листает русские голоса планшета и сразу даёт послушать.
+$('btnVoice').addEventListener('click', () => {
+  haptic('medium');
+  refreshVoices();
+  if (!ruVoices.length) {
+    showCaption('Планшет не отдал ни одного русского голоса. Проверь звук и попробуй ещё.', 2800);
+    return;
+  }
+  voiceIndex = (voiceIndex + 1) % ruVoices.length;
+  ruVoice = ruVoices[voiceIndex];
+  pickedVoiceName = ruVoice.name;
+  try {
+    localStorage.setItem(VOICE_STORE, pickedVoiceName);
+  } catch (_) { /* не критично */ }
+  speak('Кусай мой блестящий металлический зад!'); // послушать новый голос
+  showCaption(`Голос: ${voiceLabel()} (${voiceIndex + 1}/${ruVoices.length})`, 2600);
+});
+
 $('btnFull').addEventListener('click', async () => {
   haptic('medium');
   try {
@@ -273,6 +331,7 @@ async function pollCommands() {
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
     if (window.BenderEyes) window.BenderEyes.sync(data.eyes || { on: false });
+    applyTune(data.voice); // голос, выставленный хозяином из Telegram
 
     for (const command of data.commands || []) {
       const id = Number(command.id) || 0;
@@ -302,6 +361,7 @@ pollCommands();
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); $('btnTalk').click(); }
   if (e.key === 'f' || e.key === 'а') $('btnFull').click();
+  if (e.key === 'g' || e.key === 'п') $('btnVoice').click(); // «г» — голос
 });
 
 // ---- главный цикл ---------------------------------------------------------
