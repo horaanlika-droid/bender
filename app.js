@@ -13,6 +13,10 @@
 //   TG_BOT_URL — ссылка на бота, напр. https://t.me/bender_prototype_bot (кнопка на лендинге).
 //   PORT       — порт HTTP, задаёт платформа.
 //   EYES_DIR   — куда класть последний кадр камеры (по умолчанию var/eyes; тесты переопределяют).
+//   LORE_DIR   — папка памяти (по умолчанию brain/lore; тесты переопределяют).
+//   LLM_URL    — слот под живую модель: Ollama (http://127.0.0.1:11434) или OpenAI-совместимый
+//                адрес. Не задан — отвечает заглушка на правилах, как brain/llm.py:StubLLM.
+//   LLM_MODEL, LLM_KIND, LLM_API_KEY, LLM_TIMEOUT — уточнения к LLM_URL, по желанию.
 
 'use strict';
 
@@ -20,6 +24,9 @@ const crypto = require('crypto');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+
+const { Brain, llmFromEnv } = require('./lib/brain');
+const lore = require('./lib/lore');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -37,6 +44,10 @@ const mimeTypes = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
   '.txt': 'text/plain; charset=utf-8',
 };
 
@@ -196,6 +207,103 @@ function secondsAgoText(ms) {
   return `${Math.max(0, Math.round((Date.now() - ms) / 1000))} с назад`;
 }
 
+// ---- мозг: память канона и голос морды --------------------------------------
+// Бот отвечает не заготовками, а воспоминаниями: lib/brain.js берёт те же файлы
+// brain/lore/*.md, что и python-мозг (brain/lore.py). Хозяин пишет /ask — морда
+// на планшете говорит ответ вслух тем голосом, который выставлен здесь.
+
+const VOICE_DEFAULT = { rate: 1.0, pitch: 0.55 };
+const VOICE_PRESETS = {
+  bender: { rate: 1.0, pitch: 0.55 }, // по умолчанию: низкий, ровный
+  bass: { rate: 0.92, pitch: 0.32 }, // железный бас, «старина»
+  fast: { rate: 1.3, pitch: 0.6 }, // тараторит, как в дубляже
+};
+const voice = { ...VOICE_DEFAULT };
+
+function voiceState() {
+  return { ...voice };
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+//: Разбор /voice: пресеты «bender|bass|fast» или «pitch=0.4 rate=1.1».
+function voiceApply(arg) {
+  const raw = String(arg || '').trim().toLowerCase();
+  if (!raw || raw === 'reset' || raw === 'default') {
+    Object.assign(voice, VOICE_DEFAULT);
+    return { ok: true, note: raw ? 'вернул заводской голос' : 'голос по умолчанию' };
+  }
+  if (VOICE_PRESETS[raw]) {
+    Object.assign(voice, VOICE_PRESETS[raw]);
+    return { ok: true, note: `пресет «${raw}»` };
+  }
+  let touched = 0;
+  for (const pair of raw.split(/[\s,;]+/).filter(Boolean)) {
+    const m = /^(pitch|rate|тон|скорость)\s*[=:]\s*(\d+(?:[.,]\d+)?)$/.exec(pair);
+    if (!m) continue;
+    const value = Number(m[2].replace(',', '.'));
+    if (!Number.isFinite(value)) continue;
+    if (m[1] === 'pitch' || m[1] === 'тон') voice.pitch = clamp(value, 0, 2);
+    else voice.rate = clamp(value, 0.5, 2);
+    touched += 1;
+  }
+  if (!touched) return { ok: false };
+  return { ok: true, note: 'записал' };
+}
+
+function voiceLine() {
+  const preset = Object.entries(VOICE_PRESETS).find(
+    ([, v]) => v.rate === voice.rate && v.pitch === voice.pitch,
+  );
+  return `Голос морды: pitch ${voice.pitch}, rate ${voice.rate}${preset ? ` (пресет «${preset[0]}»)` : ''}.`;
+}
+
+let brainInstance = null;
+
+//: Мозг создаётся лениво: до первого /ask память не читается.
+function getBrain() {
+  if (!brainInstance) {
+    brainInstance = new Brain({ loreDir: env('LORE_DIR') || undefined, llm: llmFromEnv() });
+  }
+  return brainInstance;
+}
+
+//: Подмена мозга в тестах (например, на живой движок с mock-сервером).
+function setBrain(brain) {
+  brainInstance = brain;
+}
+
+//: Реплика мясомешка → ответ Бендера из памяти (+ сведения, что всплыло).
+async function benderAnswer(text) {
+  return getBrain().answer(text, { k: 3 });
+}
+
+function memoryLine() {
+  const brain = getBrain();
+  const { chunks, episodes } = brain.memoryStats();
+  const engine = brain.llm ? brain.llm.name : 'заглушка (LLM_URL не задан)';
+  return `• память: ${chunks} кусков канона, ${episodes} серий и фильмов; движок — ${engine}`;
+}
+
+//: Что показать как «всплыло»: верхний кусок и осмысленные рядом.
+//: Сезонные оглавления («Сезон 4 — 18 серий») в выдачу попадают по совпадению
+//: слов, но воспоминанием не являются — их не показываем.
+function memoryHighlights(memories, limit = 3) {
+  const top = (memories || [])[0];
+  if (!top) return [];
+  return memories.filter((m, i) => i === 0 || m.code || m.score >= 0.8 * top.score).slice(0, limit);
+}
+
+function recallLine(query) {
+  const memories = lore.recall(query, { k: 3, loreDir: env('LORE_DIR') || undefined });
+  if (!memories.length) return 'Ничего не всплыло. Для меня это значит: такого не было.';
+  return memories
+    .map((m) => `• ${m.path} — балл ${m.score}\n  ${m.text.split('\n')[0].slice(0, 160)}`)
+    .join('\n');
+}
+
 // Читает тело запроса с лимитом. Лишнее не копим в памяти — только помечаем.
 function readBody(req, limit) {
   return new Promise((resolve, reject) => {
@@ -256,12 +364,20 @@ function helpText(admin) {
     '/id — твой chat id (он же ADMIN_ID для хозяина)',
     '/help — вот это сообщение',
   ];
+  lines.push(
+    '',
+    'Поговорить со мной: /ask кто такой Фрай — отвечаю из своих воспоминаний' +
+      (admin ? ' (и морда скажет вслух)' : ''),
+  );
   if (admin) {
     lines.push(
       '',
       'Хозяину:',
       '/say текст — морда на планшете скажет вслух',
+      '/ask текст — я вспомню канон и отвечу, морда озвучит',
       '/expr happy|angry|surprised|idle — выражение морды',
+      '/voice bass|bender|fast|pitch=0.4 rate=1.1 — голос морды',
+      '/recall текст — что всплывает в памяти (без ответа)',
       '/eyes on|off|status — камера и микрофон планшета (on на 15 мин, можно /eyes on 30)',
       '/look — что видит камера последним кадром',
       '/heard — что морда услышала за последнее время',
@@ -291,6 +407,7 @@ function answerFor(chatId, text) {
         'Я — Бендер. Старина.\n\n' +
         'Это бот проекта: железный зад с ложной биографией и инструментами в физический мир. ' +
         'Глаза и рот живут на экране планшета — он и есть голова, тело собирается вокруг.\n\n' +
+        'Спроси про канон — отвечу из своих воспоминаний: /ask кто такой Фрай.\n' +
         'Жми кнопки — всё откроется прямо тут.' +
         owner,
       buttons: MENU_BUTTONS,
@@ -323,7 +440,9 @@ function answerFor(chatId, text) {
         'Статус:\n' +
         '• мозг (brain/) — живёт без железа ✓\n' +
         '• память и лор сериала — в промпте ✓\n' +
-        '• морда на планшете — глаза и рот на экране ✓\n' +
+        `${memoryLine()}\n` +
+        `• морда на планшете — глаза и рот на экране ✓\n` +
+        `• ${voiceLine()}\n` +
         `• камера и микрофон планшета — ${eyesActive() ? 'включены' : 'выключены (/eyes on)'}\n` +
         '• лендинг + бот — готовы ✓\n' +
         `${adminLine()}\n` +
@@ -332,6 +451,46 @@ function answerFor(chatId, text) {
         '• корпус — отдельный раунд CAD\n\n' +
         'Касса: 500 000 ₽, расход 0. Одна задача за раунд.',
       buttons: MENU_BUTTONS,
+    };
+  }
+
+  // /ask — вопрос Бендеру: отвечает память (lib/brain.js), морда озвучивает ответ.
+  // Текст ответа видят все, голосом морды говорит только хозяин.
+  if (head === '/ask' || head === '/think' || head === '/remember') {
+    if (!arg) {
+      return {
+        text: 'Спроси по-человечески: /ask кто такой Фрай. Ещё понимаю /ask помнишь Сеймура.',
+        buttons: [],
+      };
+    }
+    return {
+      text: '',
+      buttons: [],
+      ask: { query: arg.slice(0, SAY_LIMIT), speak: admin },
+    };
+  }
+
+  if (head === '/recall') {
+    if (!admin) return { text: `Копаться в моей памяти — хозяину.\n${idNote}`, buttons: [] };
+    if (!arg) return { text: 'Что вспомнить? Пиши: /recall Сеймур.', buttons: [] };
+    return { text: `Всплывает по запросу «${arg.slice(0, 120)}»:\n${recallLine(arg)}`, buttons: [] };
+  }
+
+  if (head === '/voice') {
+    if (!admin) return { text: `Голос морды — хозяину.\n${idNote}`, buttons: [] };
+    const result = voiceApply(arg);
+    if (!result.ok) {
+      return {
+        text:
+          'Не понял. Варианты: /voice bass, /voice bender, /voice fast, ' +
+          '/voice pitch=0.4 rate=1.1 или /voice reset.\n' +
+          voiceLine(),
+        buttons: [],
+      };
+    }
+    return {
+      text: `${result.note.charAt(0).toUpperCase()}${result.note.slice(1)}. ${voiceLine()}\nМорда подхватит в следующие 2 секунды.`,
+      buttons: [],
     };
   }
 
@@ -478,11 +637,14 @@ function createServer() {
     if (host && !/^(localhost|127\.0\.0\.1)$/i.test(host)) derivedHost = host;
 
     if (pathname === '/health') {
+      const stats = getBrain().memoryStats();
       json(res, 200, {
         ok: true,
         bot: Boolean(botToken()),
         admin: adminIds().length > 0,
         uptime: Math.floor(process.uptime()),
+        memory: { chunks: stats.chunks, episodes: stats.episodes, engine: getBrain().llm ? getBrain().llm.name : 'stub' },
+        voice: voiceState(),
         face: {
           pending: face.items.length,
           lastSeenAt: face.lastSeenAt || null,
@@ -495,8 +657,28 @@ function createServer() {
     if (pathname === '/api/face' || pathname === '/api/face/poll') {
       face.lastSeenAt = Date.now();
       const data = faceCommandsSince(query.get('since'));
-      // eyes: включены ли камера и микрофон для этой морды (только с токеном хозяина)
-      json(res, 200, { ok: true, ...data, eyes: eyesState(query.get('eyes')) });
+      json(res, 200, {
+        ok: true,
+        ...data,
+        // eyes: включены ли камера и микрофон для этой морды (только с токеном хозяина)
+        eyes: eyesState(query.get('eyes')),
+        // voice: голос морды, выставленный хозяином (/voice)
+        voice: voiceState(),
+      });
+      return;
+    }
+
+    // Что всплывает в памяти по запросу — только чтение канона, без секретов.
+    if (pathname === '/api/recall') {
+      const q = (query.get('q') || '').slice(0, 200);
+      if (!q) {
+        json(res, 400, { ok: false, error: 'нужен параметр q' });
+        return;
+      }
+      const memories = lore
+        .recall(q, { k: 3, loreDir: env('LORE_DIR') || undefined })
+        .map((m) => ({ ...m, preview: m.text.split('\n')[0].slice(0, 200) }));
+      json(res, 200, { ok: true, q, memories });
       return;
     }
 
@@ -579,6 +761,35 @@ function keyboardFor(buttons) {
   return keyboard.length ? { inline_keyboard: keyboard } : undefined;
 }
 
+// Ответ на /ask: память — вслух, память — в чат.
+// Показываем, что именно всплыло: это ложные воспоминания, их видно, а не «поверь на слово».
+async function answerAsk(chatId, ask) {
+  let reply;
+  try {
+    reply = await benderAnswer(ask.query);
+  } catch (error) {
+    await tgCall('sendMessage', {
+      chat_id: chatId,
+      text: `Память заклинило: ${error.message}. Позову инженера — то есть тебя, старина.`,
+    });
+    return;
+  }
+
+  if (ask.speak) facePush('say', reply.text);
+
+  const lines = [reply.text];
+  const top = memoryHighlights(reply.memories);
+  if (top.length) {
+    lines.push('', '🧠 Всплыло в памяти:', ...top.map((m) => `• ${m.path} (${m.source}, балл ${m.score})`));
+  } else {
+    lines.push('', '🧠 В памяти пусто — говорю честно: не помню.');
+  }
+  if (reply.fallback) lines.push('', `⚠️ Модель не ответила (${reply.error}) — ответила заглушка.`);
+  if (ask.speak) lines.push('', 'Морда скажет это вслух.');
+
+  await tgCall('sendMessage', { chat_id: chatId, text: lines.join('\n').slice(0, 4000) });
+}
+
 async function handleUpdate(update) {
   const msg = update.message || update.edited_message;
   if (!msg || !msg.chat) return;
@@ -591,6 +802,12 @@ async function handleUpdate(update) {
 
   const answer = answerFor(chatId, msg.text);
   for (const command of answer.face || []) facePush(command.kind, command.text);
+
+  // /ask: ответ рождается в памяти (и, если настроена модель, у неё) — это асинхронно.
+  if (answer.ask) {
+    await answerAsk(chatId, answer.ask);
+    return;
+  }
 
   if (answer.photo) {
     const sent = await tgSendPhoto(chatId, eyesFramePath(), answer.text).catch(() => null);
@@ -702,9 +919,14 @@ function start() {
 }
 
 module.exports = {
+  Brain,
   FACE_EXPRESSIONS,
+  VOICE_DEFAULT,
+  VOICE_PRESETS,
   adminIds,
+  answerAsk,
   answerFor,
+  benderAnswer,
   createServer,
   eyes,
   eyesActive,
@@ -718,11 +940,20 @@ module.exports = {
   faceCommandsSince,
   facePush,
   fillPlaceholders,
+  getBrain,
+  lore,
   handleUpdate,
   isAdmin,
+  memoryHighlights,
   parseAdmins,
   publicUrl,
+  recallLine,
+  setBrain,
   start,
+  voice,
+  voiceApply,
+  voiceLine,
+  voiceState,
 };
 
 if (require.main === module) start();

@@ -15,6 +15,8 @@ if (tg) {
 // ---- реплики (канон из brain/lore/90_quotes.md) ----------------------------
 const QUOTES = [
   'Кусай мой блестящий металлический зад!',
+  // с записью в public/audio (см. manifest.json) — звучит голосом Бендера, не планшета
+  'Кусай мой блестящий металлический зад, мясомешок!',
   'Построю свой собственный парк — с блэкджеком и шлюхами!',
   'Убить всех человеков!',
   'Мы в пролёте.',
@@ -106,18 +108,99 @@ function setExpression(name) {
   }
 }
 
-// ---- речь -----------------------------------------------------------------
+// ---- голос ----------------------------------------------------------------
+// Голос железный: низкий тон, ровный темп. Хозяин может переопределить его из
+// Telegram (/voice bass|bender|fast|pitch=0.4 rate=1.1) — настройки приезжают
+// вместе с командами морды. А на самом планшете кнопка «Голос» листает русские
+// голоса системы: у iPad их несколько, и запоминаем выбор для этой морды.
+const VOICE_STORE = 'bender.voice';
+const TUNE_DEFAULT = { rate: 1.0, pitch: 0.55 };
+
+let tune = { ...TUNE_DEFAULT };
+let ruVoices = [];
+let voiceIndex = -1;
 let ruVoice = null;
-function pickVoice() {
-  const voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
-  ruVoice =
-    voices.find((v) => /ru/i.test(v.lang) && /google|yandex|milena|female/i.test(v.name)) ||
-    voices.find((v) => /ru/i.test(v.lang)) ||
-    null;
+let pickedVoiceName = '';
+
+try {
+  pickedVoiceName = localStorage.getItem(VOICE_STORE) || '';
+} catch (_) { /* приватный режим — не беда */ }
+
+//: Хорошие голоса — вперёд: сначала Яндекс/Google/системные, потом остальные.
+function voiceRank(v) {
+  const name = `${v.name} ${v.voiceURI || ''}`.toLowerCase();
+  if (/yandex|яндекс/.test(name)) return 0;
+  if (/google/.test(name)) return 1;
+  if (/milena|alena|alyona|katya|dmitr|yuri|pavel|maxim|милена|алена/.test(name)) return 2;
+  return 3;
 }
+
+function refreshVoices() {
+  const voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+  ruVoices = voices.filter((v) => /^ru/i.test(v.lang)).sort((a, b) => voiceRank(a) - voiceRank(b));
+  const byName = ruVoices.findIndex((v) => v.name === pickedVoiceName);
+  voiceIndex = byName >= 0 ? byName : 0;
+  ruVoice = ruVoices[voiceIndex] || null;
+}
+
 if (window.speechSynthesis) {
-  pickVoice();
-  speechSynthesis.onvoiceschanged = pickVoice;
+  refreshVoices();
+  speechSynthesis.onvoiceschanged = refreshVoices;
+}
+
+// ---- записи настоящего голоса (public/audio) -------------------------------
+// Коронные фразы из канона лежат готовыми файлами — это записанный голос
+// Бендера, а не голос планшета. Всё остальное (например ответ на /ask из
+// памяти) говорит speechSynthesis с настройками хозяина: записать заранее
+// можно только то, что известно заранее.
+let recordings = new Map();
+let audioEl = null;
+
+fetch('audio/manifest.json', { cache: 'force-cache' })
+  .then((res) => (res.ok ? res.json() : null))
+  .then((data) => {
+    for (const line of (data && data.lines) || []) recordings.set(line.text, `audio/${line.file}`);
+  })
+  .catch(() => { /* без записей морда говорит голосом планшета */ });
+
+//: Записать реплику в файл не выйдет — пробуем и честно возвращаем false,
+//: чтобы speak() откатился на синтез (iOS без жеста запись не пустит).
+function playRecording(url, text) {
+  try {
+    if (audioEl) {
+      audioEl.pause();
+      audioEl = null;
+    }
+    const el = new Audio(url);
+    audioEl = el;
+    el.onended = () => { S.talking = false; };
+    el.onerror = () => { S.talking = false; };
+    const started = el.play();
+    if (started && typeof started.catch === 'function') {
+      started.catch(() => {
+        audioEl = null;
+        speakSynth(text);
+      });
+    }
+    return true;
+  } catch (_) {
+    audioEl = null;
+    return false;
+  }
+}
+
+//: Голос, выставленный хозяином (/voice) — приходит с каждым опросом сервера.
+function applyTune(next) {
+  if (!next) return;
+  const rate = Number(next.rate);
+  const pitch = Number(next.pitch);
+  if (Number.isFinite(rate) && rate >= 0.5 && rate <= 2) tune.rate = rate;
+  if (Number.isFinite(pitch) && pitch >= 0 && pitch <= 2) tune.pitch = pitch;
+}
+
+function voiceLabel() {
+  if (!ruVoice) return 'системный';
+  return ruVoice.name.replace(/\s*\(.*\)\s*$/, '');
 }
 
 const caption = $('caption');
@@ -140,13 +223,20 @@ function speak(text) {
   const estMs = Math.max(1400, text.length * 75);
   talkStopTimer = setTimeout(() => { S.talking = false; }, estMs); // страховка
 
+  // Коронная фраза есть в записи — говорим записанным голосом.
+  const recorded = recordings.get(text);
+  if (recorded && playRecording(recorded, text)) return;
+  speakSynth(text);
+}
+
+function speakSynth(text) {
   if (!window.speechSynthesis) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   if (ruVoice) u.voice = ruVoice;
   u.lang = 'ru-RU';
-  u.rate = 1.0;
-  u.pitch = 0.65; // железный бас
+  u.rate = tune.rate;
+  u.pitch = tune.pitch; // железный бас: низко и ровно
   u.onend = () => { S.talking = false; };
   u.onerror = () => { S.talking = false; };
   speechSynthesis.speak(u);
@@ -225,6 +315,24 @@ $('btnTalk').addEventListener('click', () => {
   setTimeout(() => { if (!S.talking) setExpression('idle'); }, 3200);
 });
 
+//: Кнопка «Голос»: листает русские голоса планшета и сразу даёт послушать.
+$('btnVoice').addEventListener('click', () => {
+  haptic('medium');
+  refreshVoices();
+  if (!ruVoices.length) {
+    showCaption('Планшет не отдал ни одного русского голоса. Проверь звук и попробуй ещё.', 2800);
+    return;
+  }
+  voiceIndex = (voiceIndex + 1) % ruVoices.length;
+  ruVoice = ruVoices[voiceIndex];
+  pickedVoiceName = ruVoice.name;
+  try {
+    localStorage.setItem(VOICE_STORE, pickedVoiceName);
+  } catch (_) { /* не критично */ }
+  speak('Кусай мой блестящий металлический зад!'); // послушать новый голос
+  showCaption(`Голос: ${voiceLabel()} (${voiceIndex + 1}/${ruVoices.length})`, 2600);
+});
+
 $('btnFull').addEventListener('click', async () => {
   haptic('medium');
   try {
@@ -273,6 +381,7 @@ async function pollCommands() {
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
     if (window.BenderEyes) window.BenderEyes.sync(data.eyes || { on: false });
+    applyTune(data.voice); // голос, выставленный хозяином из Telegram
 
     for (const command of data.commands || []) {
       const id = Number(command.id) || 0;
@@ -302,6 +411,7 @@ pollCommands();
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); $('btnTalk').click(); }
   if (e.key === 'f' || e.key === 'а') $('btnFull').click();
+  if (e.key === 'g' || e.key === 'п') $('btnVoice').click(); // «г» — голос
 });
 
 // ---- главный цикл ---------------------------------------------------------
@@ -379,6 +489,15 @@ function frame(now) {
 setLid('L', 0);
 setLid('R', 0);
 requestAnimationFrame(frame);
+
+// Ручка для отладки и тестов — как window.BenderEyes у глаз:
+// можно сказать реплику, поставить выражение и посмотреть, что лежит в записях.
+window.BenderFace = {
+  speak,
+  setExpression,
+  recordings: () => [...recordings.keys()],
+  tune: () => ({ ...tune }),
+};
 
 // приветствие: сразу на десктопе, по первому тапу — на iOS
 setTimeout(greet, 900);
