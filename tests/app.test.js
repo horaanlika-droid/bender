@@ -265,6 +265,23 @@ test('файлы вне public/ не отдаются (path traversal закры
   });
 });
 
+test('записи голоса морды отдаются как аудио, манифест — как JSON', async () => {
+  await withServer(async (base) => {
+    const manifestRes = await fetch(`${base}/audio/manifest.json`);
+    const manifest = await manifestRes.json();
+    assert.match(manifestRes.headers.get('content-type'), /application\/json/);
+    assert.ok(manifest.lines.length >= 5, 'в наборе голосовых файлов');
+
+    for (const line of manifest.lines) {
+      const res = await fetch(`${base}/audio/${line.file}`);
+      assert.equal(res.status, 200, `нет файла ${line.file}`);
+      assert.match(res.headers.get('content-type'), /audio\/mpeg/, `${line.file} — не аудио`);
+      const bytes = (await res.arrayBuffer()).byteLength;
+      assert.ok(bytes > 1000, `${line.file} подозрительно пустой: ${bytes} байт`);
+    }
+  });
+});
+
 // ---- Полный путь: хозяин пишет боту → морда планшета говорит ---------------
 // Telegram подменяем локальным mock-сервером: проверяем весь путь, без сети.
 

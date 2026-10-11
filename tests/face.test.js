@@ -58,16 +58,14 @@ test('старую команду морда не проигрывает: вык
 });
 
 test('/expr из Telegram ставит выражение: веки приопускаются, стихов не читаем', async () => {
-  await withFace({ commands: [{ id: 1, kind: 'expr', text: 'angry', at: Date.now() }] }, async ({ win, spoken }) => {
+  await withFace({ commands: [{ id: 1, kind: 'expr', text: 'angry', at: Date.now() }] }, async ({ win, spoken, played }) => {
     await sleep(120);
     // открытое веко в этой геометрии стоит на y = −100, гнев (0.45) даёт y = +26
     const y = Number(win.document.querySelector('#lidL rect').getAttribute('y'));
     assert.ok(y > -50, `веко приопущено, y=${y}`);
     // первое касание хозяина морда отмечает приветствием, но выражение — не реплика
-    assert.deepEqual(
-      spoken.map((u) => u.text),
-      ['Привет, мясомешок. Я — Бендер.'],
-    );
+    assert.deepEqual(spoken.map((u) => u.text), [], 'приветствие идёт записью, а не синтезом');
+    assert.deepEqual([...played], ['audio/08-greeting.mp3'], 'приветствие — записанный голос');
   });
 });
 
@@ -103,13 +101,17 @@ test('тап по рту — реплика из канона, подпись в
 // ---- Голос ------------------------------------------------------------------
 
 test('голос хозяина из Telegram применяется к речи морды', async () => {
-  await withFace({ voice: { rate: 1.1, pitch: 0.4 } }, async ({ win, spoken }) => {
+  await withFace({ voice: { rate: 1.1, pitch: 0.4 } }, async ({ win, spoken, played }) => {
     await sleep(120); // даём морде получить /api/face с настройкой голоса
-    win.document.getElementById('btnTalk').dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
-    await sleep(80);
+    win.BenderFace.speak('Реплика, которой в записях нет.');
+    await sleep(20);
     const last = spoken.at(-1);
     assert.equal(last.pitch, 0.4, 'тон из /voice pitch=0.4');
     assert.equal(last.rate, 1.1, 'темп из /voice rate=1.1');
+    assert.equal(played.length, 0, 'это не запись — синтез');
+    // объект пришёл из jsdom-реальности, поэтому сравниваем по полям, а не прототипом
+    assert.equal(win.BenderFace.tune().rate, 1.1, 'морда знает темп хозяина');
+    assert.equal(win.BenderFace.tune().pitch, 0.4, 'морда знает тон хозяина');
   });
 });
 
@@ -120,6 +122,58 @@ test('кнопка «Голос» листает русские голоса п�
     assert.equal(spoken.at(-1).voice.name, 'Google русский', 'с первого Яндекс — на второй Google');
     assert.match(snapshot(win).caption, /Голос: Google русский \(2\/3\)/);
     assert.equal(win.localStorage.getItem('bender.voice'), 'Google русский', 'выбор переживёт перезагрузку');
+  });
+});
+
+// ---- Записи настоящего голоса ------------------------------------------------
+
+test('записи канона: манифест не расходится с репликами морды', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'public', 'audio', 'manifest.json'), 'utf-8'));
+  const face = fs.readFileSync(path.join(__dirname, '..', 'public', 'face.js'), 'utf-8');
+  assert.ok(manifest.lines.length >= 5, 'в наборе должны быть голосовые файлы');
+  for (const line of manifest.lines) {
+    assert.ok(
+      fs.existsSync(path.join(__dirname, '..', 'public', 'audio', line.file)),
+      `нет файла ${line.file}`,
+    );
+    assert.ok(
+      face.includes(`'${line.text}'`),
+      `текст «${line.text}» не встречается в face.js — морда его не проиграет`,
+    );
+  }
+});
+
+test('коронная фраза играется записью, а не голосом планшета', async () => {
+  await withFace({}, async ({ win, played }) => {
+    await sleep(120); // манифест подгрузился
+    // тап по рту: реплика из пула; повторяем, пока не попадём в записанную
+    for (let i = 0; i < 20 && !played.length; i += 1) {
+      win.document.getElementById('mouthGroup').dispatchEvent(new win.MouseEvent('pointerdown', { bubbles: true }));
+      await sleep(20);
+    }
+    assert.ok(played.length > 0, 'ни одна запись не проиграна');
+    assert.match(played[0], /^audio\/\d+-[\w-]+\.mp3$/);
+  });
+});
+
+test('приветствие — записанный голос Бендера', async () => {
+  await withFace({}, async ({ win, played }) => {
+    await sleep(200); // приветствие звучит через 900 мс после старта? нет: сразу на тап/таймер
+    win.document.getElementById('btnTalk').dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+    await sleep(60);
+    assert.ok(played.some((url) => url.endsWith('08-greeting.mp3')), 'первый тап: приветствие записью');
+  });
+});
+
+test('чего в записях нет — говорит синтез с настройками хозяина', async () => {
+  await withFace({ voice: { rate: 1.1, pitch: 0.4 } }, async ({ win, spoken }) => {
+    await sleep(120); // манифест подгрузился
+    const brainSpeech = 'Ответ из памяти: такого в записях нет, значит синтез.';
+    assert.equal(win.BenderFace.recordings().includes(brainSpeech), false);
+    win.BenderFace.speak(brainSpeech);
+    await sleep(20);
+    assert.equal(spoken.at(-1).text, brainSpeech);
+    assert.equal(spoken.at(-1).pitch, 0.4);
   });
 });
 

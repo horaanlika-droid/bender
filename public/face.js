@@ -15,6 +15,8 @@ if (tg) {
 // ---- реплики (канон из brain/lore/90_quotes.md) ----------------------------
 const QUOTES = [
   'Кусай мой блестящий металлический зад!',
+  // с записью в public/audio (см. manifest.json) — звучит голосом Бендера, не планшета
+  'Кусай мой блестящий металлический зад, мясомешок!',
   'Построю свой собственный парк — с блэкджеком и шлюхами!',
   'Убить всех человеков!',
   'Мы в пролёте.',
@@ -146,6 +148,47 @@ if (window.speechSynthesis) {
   speechSynthesis.onvoiceschanged = refreshVoices;
 }
 
+// ---- записи настоящего голоса (public/audio) -------------------------------
+// Коронные фразы из канона лежат готовыми файлами — это записанный голос
+// Бендера, а не голос планшета. Всё остальное (например ответ на /ask из
+// памяти) говорит speechSynthesis с настройками хозяина: записать заранее
+// можно только то, что известно заранее.
+let recordings = new Map();
+let audioEl = null;
+
+fetch('audio/manifest.json', { cache: 'force-cache' })
+  .then((res) => (res.ok ? res.json() : null))
+  .then((data) => {
+    for (const line of (data && data.lines) || []) recordings.set(line.text, `audio/${line.file}`);
+  })
+  .catch(() => { /* без записей морда говорит голосом планшета */ });
+
+//: Записать реплику в файл не выйдет — пробуем и честно возвращаем false,
+//: чтобы speak() откатился на синтез (iOS без жеста запись не пустит).
+function playRecording(url, text) {
+  try {
+    if (audioEl) {
+      audioEl.pause();
+      audioEl = null;
+    }
+    const el = new Audio(url);
+    audioEl = el;
+    el.onended = () => { S.talking = false; };
+    el.onerror = () => { S.talking = false; };
+    const started = el.play();
+    if (started && typeof started.catch === 'function') {
+      started.catch(() => {
+        audioEl = null;
+        speakSynth(text);
+      });
+    }
+    return true;
+  } catch (_) {
+    audioEl = null;
+    return false;
+  }
+}
+
 //: Голос, выставленный хозяином (/voice) — приходит с каждым опросом сервера.
 function applyTune(next) {
   if (!next) return;
@@ -180,6 +223,13 @@ function speak(text) {
   const estMs = Math.max(1400, text.length * 75);
   talkStopTimer = setTimeout(() => { S.talking = false; }, estMs); // страховка
 
+  // Коронная фраза есть в записи — говорим записанным голосом.
+  const recorded = recordings.get(text);
+  if (recorded && playRecording(recorded, text)) return;
+  speakSynth(text);
+}
+
+function speakSynth(text) {
   if (!window.speechSynthesis) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
@@ -439,6 +489,15 @@ function frame(now) {
 setLid('L', 0);
 setLid('R', 0);
 requestAnimationFrame(frame);
+
+// Ручка для отладки и тестов — как window.BenderEyes у глаз:
+// можно сказать реплику, поставить выражение и посмотреть, что лежит в записях.
+window.BenderFace = {
+  speak,
+  setExpression,
+  recordings: () => [...recordings.keys()],
+  tune: () => ({ ...tune }),
+};
 
 // приветствие: сразу на десктопе, по первому тапу — на iOS
 setTimeout(greet, 900);

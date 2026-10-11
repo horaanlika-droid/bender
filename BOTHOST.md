@@ -12,6 +12,7 @@ BotHost клонирует репозиторий и поднимает `app.js`
 | `public/index.html` | **морда** — глаза и рот для планшета в голове (управляется из бота) |
 | `public/about.html` | лендинг проекта |
 | `public/manifest.webmanifest`, `public/icon.svg` | чтобы планшет открывал морду как приложение (standalone) |
+| `public/audio/` | записанный голос Бендера: коронные фразы канона + `manifest.json` (морда ищет запись по тексту, остальное — синтез планшета) |
 | `package.json` | `npm start` → `node app.js`, `npm test` → тесты Node-слоя |
 | `Dockerfile` | явная сборка для BotHost (рабочая папка вне `/app`, как в их FAQ); копирует `lib/`, `brain/`, `public/` |
 

@@ -94,6 +94,9 @@ Telegram /ask ──► lib/brain.js ──► lib/lore.js ──► brain/lore/
   Слот под модель включается переменной `LLM_URL`, путь проверен mock-сервером в `tests/brain.test.js`.
 - Голос: `/voice bass|bender|fast|pitch=… rate=…` хозяин задаёт из Telegram, морда забирает
   настройку вместе с командами (`/api/face → voice`) и говорит своим `speechSynthesis`.
+- Записанный голос: `public/audio/` + `manifest.json` — коронные фразы звучат файлами
+  (запись по точному тексту), остальное — синтез планшета. Тест стережёт, что манифест
+  и `QUOTES` не разошлись.
 - Скриншоты: `npm run shots` (jsdom запускает настоящие `public/*.js`, resvg рисует PNG) → `docs/shots/`.
 
 ## Долговременная память (раунд 4)

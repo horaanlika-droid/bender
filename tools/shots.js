@@ -160,10 +160,24 @@ async function bootFace({ commands = [], voice = { rate: 1, pitch: 0.55 }, eyes 
     } catch (_) { /* не критично */ }
   }
 
+  // Записи настоящего голоса лежат файлами; в песочнице звука нет, поэтому
+  // играем в пустоту, но честно проигрываем: манифест читаем с диска.
+  const played = [];
+  win.Audio = class {
+    constructor(url) { this.url = String(url); }
+    play() { played.push(this.url); return Promise.resolve(); }
+    pause() {}
+  };
+
   // Сеть: сервер отдаёт ровно то, что нам нужно показать. Настоящий путь
   // «бот → очередь → морда» проверяется в tests/, здесь — декорация состояния.
+  // Манифест записей читаем с диска: это тот же файл, что отдаст BotHost.
   win.fetch = async (url) => {
     const target = String(url);
+    if (target.includes('audio/manifest.json')) {
+      const text = fs.readFileSync(path.join(PUBLIC, 'audio', 'manifest.json'), 'utf-8');
+      return { ok: true, status: 200, json: async () => JSON.parse(text) };
+    }
     return {
       ok: true,
       status: 200,
@@ -177,7 +191,7 @@ async function bootFace({ commands = [], voice = { rate: 1, pitch: 0.55 }, eyes 
   for (const file of ['eyes.js', 'face.js']) {
     win.eval(fs.readFileSync(path.join(PUBLIC, file), 'utf-8'));
   }
-  return { dom, win, spoken };
+  return { dom, win, spoken, played };
 }
 
 //: Снимок живого DOM: морда, подпись, индикаторы — то же, что видит планшет.
