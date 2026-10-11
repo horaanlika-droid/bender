@@ -50,7 +50,7 @@ python -m unittest         # 50 проверок: тело (раунд 3) + па
 node app.js                                     # лендинг + морда: http://localhost:3000
                                                 # / — морда (глаза, рот, реплики), /about.html — лендинг
 BOT_TOKEN=... ADMIN_ID=... node app.js          # + бот: /ask текст — Бендер вспомнит и морда скажет
-npm test                                        # 80 проверок Node-слоя (бот, память, мозг, морда в jsdom)
+npm test                                        # 85 проверок Node-слоя (бот, память, мозг, записи голоса, морда в jsdom)
 npm run shots                                   # скриншоты морды → docs/shots/*.png (браузер не нужен)
 npm run memory -- --answer "помнишь Сеймура"    # что всплывает и что скажет Бендер
 ```
